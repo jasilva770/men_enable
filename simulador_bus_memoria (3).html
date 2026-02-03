@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Simulador Bus de Memoria — Señales de Control</title>
+<style>
+  /* ============================================================
+     VARIABLES & RESET
+     ============================================================ */
+  :root {
+    --bg-deep:      #0a0e1a;
+    --bg-card:      #111827;
+    --bg-card2:     #1a2235;
+    --border:       #2a3a5c;
+    --txt-primary:  #e2e8f0;
+    --txt-dim:      #7b8fa6;
+    --txt-micro:    #4f6680;
+    --accent-clk:   #f59e0b;  /* amber  – clock */
+    --accent-rd:    #38bdf8;  /* sky    – read  */
+    --accent-wr:    #fb923c;  /* orange – write */
+    --accent-io:    #a78bfa;  /* violet – IO   */
+    --accent-gr:    #34d399;  /* emerald– grant */
+    --accent-en:    #f43f5e;  /* rose   – enable*/
+    --accent-cs:    #60a5fa;  /* blue   – CS    */
+    --glow-en:      0 0 18px #f43f5e88, 0 0 40px #f43f5e44;
+    --glow-on:      0 0 8px currentColor;
+    --radius:       10px;
+    --font-mono:    'Share Tech Mono', 'Courier New', monospace;
+    --font-ui:      'Sora', sans-serif;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Sora:wght@300;400;500;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg-deep);
+    color: var(--txt-primary);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+    /* subtle noise overlay */
+    background-image:
+      url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  }
+
+  /* ============================================================
+     HEADER
+     ============================================================ */
+  .header {
+    text-align: center;
+    padding: 36px 16px 20px;
+    position: relative;
+  }
+  .header::after {
+    content:'';
+    position: absolute; bottom:0; left:10%; right:10%; height:1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+  }
+  .header h1 {
+    font-weight: 300;
+    font-size: clamp(1.4rem, 3.5vw, 2rem);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--txt-primary);
+    margin-bottom: 6px;
+  }
+  .header h1 span {
+    color: var(--accent-en);
+    font-weight: 600;
+  }
+  .header p {
+    color: var(--txt-dim);
+    font-size: 0.82rem;
+    letter-spacing: 1px;
+  }
+
+  /* ============================================================
+     LAYOUT GRID
+     ============================================================ */
+  .layout {
+    max-width: 1340px;
+    margin: 24px auto;
+    padding: 0 16px 40px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 18px;
+  }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  /* ============================================================
+     CARD
+     ============================================================ */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .card-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card2);
+  }
+  .card-header .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+  }
+  .card-header h2 {
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--txt-dim);
+  }
+  .card-body { padding: 18px; }
+
+  /* ============================================================
+     SECTION IDS
+     ============================================================ */
+  .section-inputs    { grid-column: 1; grid-row: 1; }
+  .section-outputs   { grid-column: 2; grid-row: 1; }
+  .section-timing    { grid-column: 1 / -1; grid-row: 2; }
+  .section-theory    { grid-column: 1 / -1; grid-row: 3; }
+
+  /* ============================================================
+     TOGGLE SWITCHES (inputs)
+     ============================================================ */
+  .input-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .toggle-row {
+    display: flex; align-items: center; gap: 14px;
+    background: #151d2e;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 11px 14px;
+    transition: border-color .25s;
+  }
+  .toggle-row:hover { border-color: #3a5078; }
+
+  /* the switch */
+  .switch-wrap { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+  .switch-wrap input { opacity: 0; width: 0; height: 0; }
+  .switch-track {
+    position: absolute; inset: 0;
+    background: #2a3a5c;
+    border-radius: 12px;
+    transition: background .2s;
+    cursor: pointer;
+  }
+  .switch-track::before {
+    content:'';
+    position: absolute; top:2px; left:2px;
+    width:20px; height:20px; border-radius:50%;
+    background: #fff;
+    transition: transform .2s, box-shadow .2s;
+  }
+  .switch-wrap input:checked + .switch-track { background: var(--accent-clk); }
+  .switch-wrap input:checked + .switch-track::before { transform: translateX(20px); }
+  .switch-wrap.color-read   input:checked + .switch-track { background: var(--accent-rd);  }
+  .switch-wrap.color-write  input:checked + .switch-track { background: var(--accent-wr);  }
+  .switch-wrap.color-io     input:checked + .switch-track { background: var(--accent-io);  }
+  .switch-wrap.color-cs     input:checked + .switch-track { background: var(--accent-cs);  }
+
+  .toggle-label { flex: 1; min-width: 0; }
+  .toggle-label .name {
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--txt-primary);
+  }
+  .toggle-label .desc {
+    font-size: 0.72rem;
+    color: var(--txt-micro);
+    margin-top: 1px;
+  }
+  .toggle-val {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 700;
+    width: 18px;
+    text-align: center;
+    color: var(--txt-dim);
+    transition: color .2s;
+  }
+  .toggle-val.on { color: #fff; }
+
+  /* ============================================================
+     OUTPUT BADGES
+     ============================================================ */
+  .output-stack { display: flex; flex-direction: column; gap: 10px; }
+  .output-badge {
+    display: flex; align-items: center; gap: 14px;
+    background: #151d2e;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 13px 16px;
+    transition: border-color .3s, box-shadow .3s;
+  }
+  .output-badge.active {
+    border-color: var(--signal-color);
+    box-shadow: 0 0 12px var(--signal-glow);
+  }
+  .output-badge .led {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #2a3a5c;
+    transition: background .25s, box-shadow .25s;
+    flex-shrink:0;
+  }
+  .output-badge.active .led {
+    background: var(--signal-color);
+    box-shadow: 0 0 10px var(--signal-color);
+  }
+  .output-badge .info { flex:1; min-width:0; }
+  .output-badge .sig-name {
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+  .output-badge .sig-expr {
+    font-size: 0.7rem;
+    color: var(--txt-micro);
+    margin-top: 2px;
+    font-family: var(--font-mono);
+  }
+  .output-badge .sig-val {
+    font-family: var(--font-mono);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--txt-dim);
+    transition: color .25s;
+  }
+  .output-badge.active .sig-val { color: #fff; }
+
+  /* color variants */
+  .badge-read    { --signal-color: var(--accent-rd);  --signal-glow: #38bdf844; }
+  .badge-write   { --signal-color: var(--accent-wr);  --signal-glow: #fb923c44; }
+  .badge-io      { --signal-color: var(--accent-io);  --signal-glow: #a78bfa44; }
+  .badge-grant   { --signal-color: var(--accent-gr);  --signal-glow: #34d39944; }
+  .badge-enable  { --signal-color: var(--accent-en);  --signal-glow: #f43f5e55; }
+
+  /* ============================================================
+     CONFLICT STATE (MEM_WRITE bloqueado por READ)
+     ============================================================ */
+  .output-badge.conflict {
+    border-color: #f59e0b !important;
+    box-shadow: 0 0 10px #f59e0b33 !important;
+    animation: conflictPulse 1.6s ease-in-out infinite;
+  }
+  .output-badge.conflict .led {
+    background: #f59e0b !important;
+    box-shadow: 0 0 8px #f59e0b !important;
+  }
+  .output-badge.conflict .sig-val {
+    color: #f59e0b !important;
+  }
+  .output-badge.conflict .conflict-label {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 600;
+    background: #f59e0b22;
+    color: #f59e0b;
+    border: 1px solid #f59e0b55;
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-top: 3px;
+    font-family: var(--font-ui);
+    letter-spacing: 0.5px;
+  }
+  /* Label genérico para contextos fuera de .conflict (ej: prioridad en MEM_READ) */
+  .output-badge .conflict-label {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 600;
+    background: #f59e0b22;
+    color: #f59e0b;
+    border: 1px solid #f59e0b55;
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-top: 3px;
+    font-family: var(--font-ui);
+    letter-spacing: 0.5px;
+  }
+  @keyframes conflictPulse {
+    0%, 100% { box-shadow: 0 0 10px #f59e0b33; }
+    50%      { box-shadow: 0 0 20px #f59e0b66, 0 0 36px #f59e0b22; }
+  }
+
+  /* ============================================================
+     TIMING DIAGRAM
+     ============================================================ */
+  .timing-wrap { overflow-x: auto; }
+  .timing-canvas-wrap {
+    background: #0d1220;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    padding: 16px 8px;
+  }
+  canvas#timingCanvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .timing-legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    margin-top: 14px; justify-content: center;
+  }
+  .legend-item { display:flex; align-items:center; gap:6px; font-size:0.73rem; color:var(--txt-dim); }
+  .legend-swatch { width:22px; height:4px; border-radius:2px; }
+
+  /* ============================================================
+     THEORY TABS
+     ============================================================ */
+  .tabs { display:flex; gap:4px; flex-wrap: wrap; margin-bottom:0; }
+  .tab-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    color: var(--txt-dim);
+    font-family: var(--font-ui);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+  }
+  .tab-btn:hover { background: var(--bg-card2); color: var(--txt-primary); }
+  .tab-btn.active { background: var(--bg-card); color: var(--accent-en); border-color: var(--border); }
+
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  .theory-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  .theory-card {
+    background: #151d2e;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .theory-card h4 {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .theory-card h4 .badge-tag {
+    font-size: 0.65rem;
+    background: var(--accent-en);
+    color: #fff;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-family: var(--font-ui);
+    font-weight: 600;
+  }
+  .theory-card p, .theory-card li {
+    font-size: 0.76rem;
+    color: var(--txt-dim);
+    line-height: 1.55;
+  }
+  .theory-card ul { padding-left: 18px; margin-top: 6px; }
+  .theory-card code {
+    background: #0d1220;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent-clk);
+  }
+
+  /* Truth table */
+  .truth-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+  }
+  .truth-table th {
+    background: var(--bg-card2);
+    color: var(--txt-dim);
+    padding: 7px 10px;
+    text-align: center;
+    border: 1px solid var(--border);
+    font-weight: 500;
+    letter-spacing: 1px;
+  }
+  .truth-table td {
+    text-align: center;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    color: var(--txt-primary);
+  }
+  .truth-table tr:nth-child(even) td { background: #151d2e; }
+  .truth-table .val-1 { color: var(--accent-en); font-weight: 700; }
+  .truth-table .val-0 { color: var(--txt-micro); }
+
+  /* ============================================================
+     FORMULA BOX
+     ============================================================ */
+  .formula-box {
+    background: #0d1220;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-top: 14px;
+  }
+  .formula-box .label {
+    font-size: 0.68rem;
+    color: var(--txt-micro);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .formula-box .formula {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: var(--txt-primary);
+    line-height: 1.9;
+  }
+  .formula-box .formula .op { color: var(--accent-en); font-weight: 700; }
+  .formula-box .formula .sig { color: var(--accent-clk); }
+
+  /* ============================================================
+     SCENARIO BUTTONS
+     ============================================================ */
+  .scenarios { display:flex; flex-wrap:wrap; gap:8px; margin-top: 14px; }
+  .scenario-btn {
+    background: #151d2e;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--txt-dim);
+    font-family: var(--font-ui);
+    font-size: 0.73rem;
+    padding: 7px 13px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .scenario-btn:hover { border-color: var(--accent-en); color: var(--txt-primary); }
+
+  /* ============================================================
+     AUTO SIMULATE CONTROLS
+     ============================================================ */
+  .sim-controls {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 16px; flex-wrap: wrap;
+  }
+  .sim-btn {
+    background: var(--accent-en);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-family: var(--font-ui);
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 8px 18px;
+    cursor: pointer;
+    transition: filter .2s;
+    letter-spacing: 1px;
+  }
+  .sim-btn:hover { filter: brightness(1.15); }
+  .sim-btn.stop { background: var(--accent-wr); }
+  .sim-speed { display:flex; align-items:center; gap:8px; }
+  .sim-speed label { font-size:0.72rem; color:var(--txt-micro); }
+  .sim-speed select {
+    background: #151d2e; border:1px solid var(--border); color:var(--txt-primary);
+    border-radius:5px; padding:4px 8px; font-size:0.75rem;
+  }
+
+  /* ============================================================
+     SCROLLBAR
+     ============================================================ */
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background: var(--bg-deep); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius:3px; }
+
+  /* ============================================================
+     PULSE ANIMATION for MEM_ENABLE when active
+     ============================================================ */
+  @keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 12px #f43f5e44; }
+    50%      { box-shadow: 0 0 28px #f43f5e88, 0 0 50px #f43f5e22; }
+  }
+  .badge-enable.active { animation: pulseGlow 1.4s ease-in-out infinite; }
+
+  /* ============================================================
+     RESPONSIVE TWEAK
+     ============================================================ */
+  @media (max-width: 520px) {
+    .input-grid { grid-template-columns: 1fr; }
+    .tab-btn { padding: 6px 10px; font-size: 0.68rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     HEADER
+     ============================================================ -->
+<header class="header">
+  <h1>Simulador <span>Bus de Memoria</span></h1>
+  <p>Señales de Control · Lógica Combinacional · Tiempo Real</p>
+</header>
+
+<!-- ============================================================
+     MAIN LAYOUT
+     ============================================================ -->
+<div class="layout">
+
+  <!-- ── ENTRADAS ── -->
+  <section class="card section-inputs">
+    <div class="card-header">
+      <div class="dot" style="background:var(--accent-cs)"></div>
+      <h2>Señales de Entrada</h2>
+    </div>
+    <div class="card-body">
+      <div class="input-grid" id="inputGrid"></div>
+      <!-- Scenarios -->
+      <div class="scenarios" id="scenarios"></div>
+    </div>
+  </section>
+
+  <!-- ── SALIDAS ── -->
+  <section class="card section-outputs">
+    <div class="card-header">
+      <div class="dot" style="background:var(--accent-en)"></div>
+      <h2>Señales de Salida</h2>
+    </div>
+    <div class="card-body">
+      <div class="output-stack" id="outputStack"></div>
+      <div class="conflict-label" id="memIoWarning" style="display:none; margin-top:10px; padding:6px 10px; border-radius:6px; background:#1f1a0e; border:1px solid #f59e0b55; font-size:0.73rem; color:#f59e0b;">⚠ MEM e IO no pueden ser 1 simultáneamente (decodificador de dirección). MEM tiene prioridad.</div>
+      <!-- Formula summary -->
+      <div class="formula-box">
+        <div class="label">Expresiones Booleanas</div>
+        <div class="formula">
+          <span class="sig">MEM_READ</span>  = <span class="op">READ · CPU_REQUEST</span><br>
+          <span class="sig">MEM_WRITE</span> = <span class="op">WRITE · ¬READ</span><br>
+          <span class="sig">IO_SELECT</span> = <span class="op">IO · ¬MEM</span><br>
+          <span class="sig">BUS_GRANT</span> = <span class="op">BUS_REQ · BUS_AVAIL</span><br>
+          <span class="sig">MEM_ENABLE</span>= <span class="op">(READ + WRITE) · MEM · CS · CLK</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── TIMING ── -->
+  <section class="card section-timing">
+    <div class="card-header">
+      <div class="dot" style="background:var(--accent-clk)"></div>
+      <h2>Diagrama de Temporización</h2>
+    </div>
+    <div class="card-body">
+      <div class="sim-controls">
+        <button class="sim-btn" id="simStartBtn" onclick="toggleSim()">▶ INICIAR SIMULACIÓN</button>
+        <div class="sim-speed">
+          <label>Velocidad:</label>
+          <select id="simSpeed">
+            <option value="1200">Lenta</option>
+            <option value="600" selected>Normal</option>
+            <option value="300">Rápida</option>
+            <option value="150">Muy Rápida</option>
+          </select>
+        </div>
+      </div>
+      <div class="timing-wrap" style="margin-top:14px;">
+        <div class="timing-canvas-wrap">
+          <canvas id="timingCanvas"></canvas>
+        </div>
+      </div>
+      <div class="timing-legend" id="timingLegend"></div>
+    </div>
+  </section>
+
+  <!-- ── THEORY TABS ── -->
+  <section class="card section-theory">
+    <div class="card-header">
+      <div class="dot" style="background:var(--accent-io)"></div>
+      <h2>Referencia Teórica</h2>
+    </div>
+    <div class="card-body" style="padding-top:0;">
+      <div class="tabs" id="tabs"></div>
+      <div id="tabPanels" style="padding-top:16px;"></div>
+    </div>
+  </section>
+
+</div><!-- /layout -->
+
+<!-- ============================================================
+     SCRIPT
+     ============================================================ -->
+<script>
+// ================================================================
+//  DATA MODEL
+// ================================================================
+const INPUTS = [
+  { id:'READ',       label:'READ',        desc:'Señal de lectura del bus',         color:'color-read',  hex:'#38bdf8' },
+  { id:'WRITE',      label:'WRITE',       desc:'Señal de escritura del bus',       color:'color-write', hex:'#fb923c' },
+  { id:'CPU_REQUEST',label:'CPU_REQUEST', desc:'CPU solicita datos de memoria',   color:'color-read',  hex:'#38bdf8' },
+  { id:'IO',         label:'IO',          desc:'Dirección apunta a dispositivo I/O', color:'color-io',  hex:'#a78bfa' },
+  { id:'MEM',        label:'MEM',         desc:'Dirección apunta a memoria',      color:'color-read',  hex:'#38bdf8' },
+  { id:'BUS_REQ',    label:'BUS_REQ',     desc:'Se ha solicitado el bus',         color:'color-io',    hex:'#a78bfa' },
+  { id:'BUS_AVAIL',  label:'BUS_AVAIL',   desc:'Bus está libre / disponible',     color:'color-io',    hex:'#a78bfa' },
+  { id:'CS',         label:'CS',          desc:'Chip Select – chip seleccionado', color:'color-cs',    hex:'#60a5fa' },
+  { id:'CLK',        label:'CLK',         desc:'Reloj – fase alta del ciclo',     color:'color-clk',   hex:'#f59e0b' },
+];
+
+const OUTPUTS = [
+  { id:'MEM_READ',   label:'MEM_READ',  expr:'READ · CPU_REQUEST',           cls:'badge-read',   hex:'#38bdf8' },
+  { id:'MEM_WRITE',  label:'MEM_WRITE', expr:'WRITE · ¬READ',               cls:'badge-write',  hex:'#fb923c' },
+  { id:'IO_SELECT',  label:'IO_SELECT', expr:'IO · ¬MEM',                   cls:'badge-io',     hex:'#a78bfa' },
+  { id:'BUS_GRANT',  label:'BUS_GRANT', expr:'BUS_REQ · BUS_AVAIL',         cls:'badge-grant',  hex:'#34d399' },
+  { id:'MEM_ENABLE', label:'MEM_ENABLE',expr:'(READ + WRITE) · MEM · CS · CLK',   cls:'badge-enable', hex:'#f43f5e' },
+];
+
+const SCENARIOS = [
+  { name:'Lectura simple',           vals:{ READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 } },
+  { name:'Escritura simple',         vals:{ READ:0, WRITE:1, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 } },
+  { name:'Conflicto R/W',           vals:{ READ:1, WRITE:1, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 } },
+  { name:'Acceso I/O',              vals:{ READ:0, WRITE:0, CPU_REQUEST:0, IO:1, MEM:0, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:1 } },
+  { name:'Bus ocupado',             vals:{ READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:1, BUS_AVAIL:0, CS:1, CLK:1 } },
+  { name:'CS apagado',              vals:{ READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:0, CLK:1 } },
+  { name:'CLK fase baja',           vals:{ READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:0 } },
+  { name:'Todo apagado',            vals:{ READ:0, WRITE:0, CPU_REQUEST:0, IO:0, MEM:0, BUS_REQ:0, BUS_AVAIL:0, CS:0, CLK:0 } },
+];
+
+// ================================================================
+//  STATE
+// ================================================================
+let state = {};
+INPUTS.forEach(i => state[i.id] = 0);
+
+let simRunning = false;
+let simInterval = null;
+// history stores up to N columns: array of { inputs, outputs }
+const HISTORY_MAX = 28;
+let history = [];
+
+// ================================================================
+//  LOGIC ENGINE
+// ================================================================
+function calcOutputs() {
+  const s = state;
+  return {
+    MEM_READ:   s.READ  & s.CPU_REQUEST,
+    MEM_WRITE:  s.WRITE & (s.READ ^ 1),          // WRITE AND NOT READ
+    IO_SELECT:  s.IO    & (s.MEM  ^ 1),           // IO AND NOT MEM
+    BUS_GRANT:  s.BUS_REQ & s.BUS_AVAIL,
+    MEM_ENABLE: (s.READ | s.WRITE) & s.MEM & s.CS & s.CLK,
+  };
+}
+
+// ================================================================
+//  RENDER: INPUT TOGGLES
+// ================================================================
+function renderInputs() {
+  const grid = document.getElementById('inputGrid');
+  grid.innerHTML = '';
+  INPUTS.forEach(inp => {
+    const wrap = document.createElement('div');
+    wrap.className = 'toggle-row';
+    wrap.innerHTML = `
+      <div class="switch-wrap ${inp.color}" id="sw_${inp.id}">
+        <input type="checkbox" id="chk_${inp.id}" onchange="toggleInput('${inp.id}')">
+        <label class="switch-track" for="chk_${inp.id}"></label>
+      </div>
+      <div class="toggle-label">
+        <div class="name">${inp.label}</div>
+        <div class="desc">${inp.desc}</div>
+      </div>
+      <div class="toggle-val" id="val_${inp.id}">0</div>
+    `;
+    grid.appendChild(wrap);
+  });
+}
+
+function toggleInput(id) {
+  const chk = document.getElementById('chk_'+id);
+  state[id] = chk.checked ? 1 : 0;
+  document.getElementById('val_'+id).textContent = state[id];
+  document.getElementById('val_'+id).className = 'toggle-val' + (state[id] ? ' on' : '');
+  update();
+}
+
+function setInput(id, val) {
+  state[id] = val;
+  const chk = document.getElementById('chk_'+id);
+  chk.checked = !!val;
+  document.getElementById('val_'+id).textContent = val;
+  document.getElementById('val_'+id).className = 'toggle-val' + (val ? ' on' : '');
+}
+
+// ================================================================
+//  RENDER: OUTPUT BADGES
+// ================================================================
+function renderOutputBadges() {
+  const stack = document.getElementById('outputStack');
+  stack.innerHTML = '';
+  OUTPUTS.forEach(o => {
+    const badge = document.createElement('div');
+    badge.className = `output-badge ${o.cls}`;
+    badge.id = 'badge_'+o.id;
+    badge.innerHTML = `
+      <div class="led" id="led_${o.id}"></div>
+      <div class="info">
+        <div class="sig-name" style="color:${o.hex}">${o.label}</div>
+        <div class="sig-expr">${o.expr}</div>
+      </div>
+      <div class="sig-val" id="sval_${o.id}">0</div>
+    `;
+    stack.appendChild(badge);
+  });
+}
+
+function updateOutputBadges(outs) {
+  const hasConflict = state.READ === 1 && state.WRITE === 1;
+  const hasMemIoConflict = state.MEM === 1 && state.IO === 1;
+
+  // Advertencia MEM ↔ IO
+  document.getElementById('memIoWarning').style.display = hasMemIoConflict ? 'block' : 'none';
+
+  OUTPUTS.forEach(o => {
+    const v = outs[o.id];
+    const badge = document.getElementById('badge_'+o.id);
+    // Remover estados previos
+    badge.classList.remove('active', 'conflict');
+    // Eliminar labels dinámicos anteriores
+    badge.querySelectorAll('.conflict-label').forEach(el => el.remove());
+
+    if (o.id === 'MEM_WRITE' && hasConflict) {
+      // MEM_WRITE bloqueado por prioridad de READ
+      badge.classList.add('conflict');
+      document.getElementById('sval_'+o.id).textContent = '0';
+      const infoDiv = badge.querySelector('.info');
+      const label = document.createElement('div');
+      label.className = 'conflict-label';
+      label.textContent = '⚠ BLOQUEADO por READ';
+      infoDiv.appendChild(label);
+    } else if (o.id === 'MEM_READ' && hasConflict) {
+      // MEM_READ tiene prioridad — mostrar indicador verde
+      badge.classList.toggle('active', v === 1);
+      document.getElementById('sval_'+o.id).textContent = v;
+      const infoDiv = badge.querySelector('.info');
+      const label = document.createElement('div');
+      label.className = 'conflict-label';
+      label.style.color = '#34d399';
+      label.style.borderColor = '#34d39955';
+      label.style.background = '#0f1f15';
+      label.textContent = '✓ Tiene prioridad sobre WRITE';
+      infoDiv.appendChild(label);
+    } else {
+      badge.classList.toggle('active', v === 1);
+      document.getElementById('sval_'+o.id).textContent = v;
+    }
+  });
+}
+
+// ================================================================
+//  RENDER: SCENARIOS
+// ================================================================
+function renderScenarios() {
+  const wrap = document.getElementById('scenarios');
+  wrap.innerHTML = '';
+  SCENARIOS.forEach((sc, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'scenario-btn';
+    btn.textContent = sc.name;
+    btn.onclick = () => applyScenario(i);
+    wrap.appendChild(btn);
+  });
+}
+
+function applyScenario(i) {
+  const sc = SCENARIOS[i];
+  INPUTS.forEach(inp => setInput(inp.id, sc.vals[inp.id]));
+  update();
+}
+
+// ================================================================
+//  TIMING DIAGRAM
+// ================================================================
+const TIMING_SIGNALS = [
+  { id:'CLK',        hex:'#f59e0b', label:'CLK'        },
+  { id:'READ',       hex:'#38bdf8', label:'READ'       },
+  { id:'WRITE',      hex:'#fb923c', label:'WRITE'      },
+  { id:'CS',         hex:'#60a5fa', label:'CS'         },
+  { id:'MEM_READ',   hex:'#38bdf8', label:'MEM_READ'   },
+  { id:'MEM_WRITE',  hex:'#fb923c', label:'MEM_WRITE'  },
+  { id:'IO_SELECT',  hex:'#a78bfa', label:'IO_SELECT'  },
+  { id:'BUS_GRANT',  hex:'#34d399', label:'BUS_GRANT'  },
+  { id:'MEM_ENABLE', hex:'#f43f5e', label:'MEM_ENABLE' },
+];
+
+const ROW_H  = 32;
+const LABEL_W = 82;
+const COL_W  = 30;
+
+function getCanvasSize() {
+  const cols = HISTORY_MAX;
+  return { w: LABEL_W + cols * COL_W, h: TIMING_SIGNALS.length * ROW_H + 24 };
+}
+
+function setupCanvas() {
+  const canvas = document.getElementById('timingCanvas');
+  const sz = getCanvasSize();
+  canvas.width  = sz.w;
+  canvas.height = sz.h;
+  // CSS pixel ratio
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width  = sz.w + 'px';
+  canvas.style.height = sz.h + 'px';
+}
+
+function drawTiming() {
+  const canvas = document.getElementById('timingCanvas');
+  const ctx = canvas.getContext('2d');
+  const sz = getCanvasSize();
+  ctx.clearRect(0, 0, sz.w, sz.h);
+
+  const totalCols = HISTORY_MAX;
+
+  TIMING_SIGNALS.forEach((sig, row) => {
+    const y = row * ROW_H;
+
+    // label bg
+    ctx.fillStyle = '#151d2e';
+    ctx.fillRect(0, y, LABEL_W, ROW_H);
+
+    // label text
+    ctx.fillStyle = sig.hex;
+    ctx.font = '600 11px "Share Tech Mono", monospace';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sig.label, 8, y + ROW_H / 2);
+
+    // separator
+    ctx.strokeStyle = '#2a3a5c';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y + ROW_H);
+    ctx.lineTo(sz.w, y + ROW_H);
+    ctx.stroke();
+
+    // vertical label|data divider
+    ctx.strokeStyle = '#3a5078';
+    ctx.beginPath();
+    ctx.moveTo(LABEL_W, y);
+    ctx.lineTo(LABEL_W, y + ROW_H);
+    ctx.stroke();
+
+    // draw history columns
+    for (let c = 0; c < totalCols; c++) {
+      const hIdx = c;  // oldest first
+      const x = LABEL_W + c * COL_W;
+
+      // column bg alternating
+      if (c % 2 === 0) {
+        ctx.fillStyle = '#0d1220';
+        ctx.fillRect(x, y, COL_W, ROW_H);
+      }
+
+      if (hIdx < history.length) {
+        const entry = history[hIdx];
+        const val = entry.all[sig.id] !== undefined ? entry.all[sig.id] : 0;
+
+        if (val) {
+          // filled block
+          ctx.fillStyle = sig.hex + '33';
+          ctx.fillRect(x + 1, y + 4, COL_W - 2, ROW_H - 8);
+          // top bright bar
+          ctx.fillStyle = sig.hex;
+          ctx.fillRect(x + 1, y + 4, COL_W - 2, 3);
+        }
+      }
+    }
+
+    // vertical grid lines
+    ctx.strokeStyle = '#1f2d44';
+    ctx.lineWidth = 1;
+    for (let c = 0; c <= totalCols; c++) {
+      const x = LABEL_W + c * COL_W;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + ROW_H);
+      ctx.stroke();
+    }
+  });
+
+  // top time bar
+  const topY = TIMING_SIGNALS.length * ROW_H;
+  ctx.fillStyle = '#1a2235';
+  ctx.fillRect(LABEL_W, topY, sz.w - LABEL_W, 24);
+  ctx.fillStyle = '#4f6680';
+  ctx.font = '500 10px "Share Tech Mono", monospace';
+  ctx.textBaseline = 'middle';
+  for (let c = 0; c < totalCols; c += 4) {
+    ctx.fillText('T' + c, LABEL_W + c * COL_W + 4, topY + 12);
+  }
+  // current marker
+  if (history.length > 0) {
+    const curCol = history.length - 1;
+    const mx = LABEL_W + curCol * COL_W;
+    ctx.strokeStyle = '#f43f5e';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4,3]);
+    ctx.beginPath();
+    ctx.moveTo(mx + COL_W, 0);
+    ctx.lineTo(mx + COL_W, topY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function renderLegend() {
+  const wrap = document.getElementById('timingLegend');
+  wrap.innerHTML = '';
+  TIMING_SIGNALS.forEach(sig => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = `<div class="legend-swatch" style="background:${sig.hex}"></div>${sig.label}`;
+    wrap.appendChild(item);
+  });
+}
+
+// ================================================================
+//  SIMULATION LOOP
+// ================================================================
+function pushHistory() {
+  const outs = calcOutputs();
+  const all = { ...state, ...outs };
+  history.push({ all });
+  if (history.length > HISTORY_MAX) history.shift();
+  drawTiming();
+}
+
+const SIM_SEQUENCES = [
+  // Lectura: READ=1
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:0 },
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 },
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 },
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:0 },
+  // Escritura: WRITE=1
+  { READ:0, WRITE:1, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:0 },
+  { READ:0, WRITE:1, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 },
+  { READ:0, WRITE:1, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:1 },
+  { READ:0, WRITE:1, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:0, BUS_AVAIL:1, CS:1, CLK:0 },
+  // IO
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:1, MEM:0, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:0 },
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:1, MEM:0, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:1 },
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:1, MEM:0, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:1 },
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:1, MEM:0, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:0 },
+  // Bus ocupado
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:1, BUS_AVAIL:0, CS:1, CLK:0 },
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:1, BUS_AVAIL:0, CS:1, CLK:1 },
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:1 }, // bus libre
+  { READ:1, WRITE:0, CPU_REQUEST:1, IO:0, MEM:1, BUS_REQ:1, BUS_AVAIL:1, CS:1, CLK:0 },
+  // Idle
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:0, MEM:0, BUS_REQ:0, BUS_AVAIL:1, CS:0, CLK:0 },
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:0, MEM:0, BUS_REQ:0, BUS_AVAIL:1, CS:0, CLK:1 },
+  { READ:0, WRITE:0, CPU_REQUEST:0, IO:0, MEM:0, BUS_REQ:0, BUS_AVAIL:1, CS:0, CLK:0 },
+];
+
+let simIdx = 0;
+
+function toggleSim() {
+  simRunning = !simRunning;
+  const btn = document.getElementById('simStartBtn');
+  if (simRunning) {
+    btn.textContent = '⏹ DETENER';
+    btn.classList.add('stop');
+    const ms = parseInt(document.getElementById('simSpeed').value);
+    simInterval = setInterval(() => {
+      const seq = SIM_SEQUENCES[simIdx % SIM_SEQUENCES.length];
+      INPUTS.forEach(inp => setInput(inp.id, seq[inp.id]));
+      update();
+      simIdx++;
+    }, ms);
+  } else {
+    btn.textContent = '▶ INICIAR SIMULACIÓN';
+    btn.classList.remove('stop');
+    clearInterval(simInterval);
+  }
+}
+
+// ================================================================
+//  THEORY TABS
+// ================================================================
+const TABS = [
+  { id:'signals', label:'Señales' },
+  { id:'enable',  label:'MEM_ENABLE' },
+  { id:'truth',   label:'Tabla Verdad' },
+  { id:'arch',    label:'Arquitectura' },
+];
+
+function renderTabs() {
+  const tabsWrap = document.getElementById('tabs');
+  tabsWrap.innerHTML = '';
+  TABS.forEach((t,i) => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (i===0?' active':'');
+    btn.textContent = t.label;
+    btn.onclick = () => switchTab(t.id);
+    tabsWrap.appendChild(btn);
+  });
+  renderTabPanels();
+}
+
+function switchTab(id) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', TABS[i].id === id));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === id));
+}
+
+function renderTabPanels() {
+  const wrap = document.getElementById('tabPanels');
+  wrap.innerHTML = `
+  <!-- SIGNALS -->
+  <div class="tab-panel active" data-tab="signals">
+    <div class="theory-grid">
+      <div class="theory-card">
+        <h4 style="color:var(--accent-rd)">MEM_READ <span class="badge-tag">Salida</span></h4>
+        <p>Se activa cuando la CPU necesita <strong>leer</strong> datos desde memoria principal. Requiere que la señal <code>READ</code> esté activa simultáneamente con <code>CPU_REQUEST</code>.</p>
+        <p style="margin-top:6px"><strong style="color:var(--accent-rd)">Expresión:</strong> <code>READ · CPU_REQUEST</code></p>
+      </div>
+      <div class="theory-card">
+        <h4 style="color:var(--accent-wr)">MEM_WRITE <span class="badge-tag">Salida</span></h4>
+        <p>Se activa cuando se debe <strong>escribir</strong> datos en memoria. Es mutuamente excluyente con lectura: si <code>READ=1</code>, la escritura se bloquea automáticamente.</p>
+        <p style="margin-top:6px"><strong style="color:var(--accent-wr)">Expresión:</strong> <code>WRITE · ¬READ</code></p>
+      </div>
+      <div class="theory-card">
+        <h4 style="color:var(--accent-io)">IO_SELECT <span class="badge-tag">Salida</span></h4>
+        <p>Selecciona un dispositivo de <strong>entrada/salida</strong> (disco, red, etc.) en lugar de memoria. Si la dirección apunta a memoria (<code>MEM=1</code>), la señal I/O se desactiva.</p>
+        <p style="margin-top:6px"><strong style="color:var(--accent-io)">Expresión:</strong> <code>IO · ¬MEM</code></p>
+      </div>
+      <div class="theory-card">
+        <h4 style="color:var(--accent-gr)">BUS_GRANT <span class="badge-tag">Salida</span></h4>
+        <p>El controlador del bus <strong>concede acceso</strong> al dispositivo solicitante. Ambas condiciones deben cumplirse: alguien debe solicitar (<code>BUS_REQ</code>) y el bus debe estar libre (<code>BUS_AVAIL</code>).</p>
+        <p style="margin-top:6px"><strong style="color:var(--accent-gr)">Expresión:</strong> <code>BUS_REQ · BUS_AVAIL</code></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEM_ENABLE -->
+  <div class="tab-panel" data-tab="enable">
+    <div class="theory-card" style="border-color:#f43f5e55; background:#1f1520;">
+      <h4 style="color:var(--accent-en); font-size:1rem;">MEM_ENABLE — Señal Master <span class="badge-tag">CRÍTICA</span></h4>
+      <p>Esta señal actúa como <strong>habilitador global</strong> del chip de memoria. Sin ella, ninguna operación de lectura ni escritura puede completarse.</p>
+      <ul>
+        <li><strong style="color:var(--accent-en)">Condición 1:</strong> Debe existir una operación activa: <code>READ=1</code> <em>ó</em> <code>WRITE=1</code> (operación OR).</li>
+        <li><strong style="color:var(--accent-en)">Condición 2:</strong> La dirección debe apuntar a memoria: <code>MEM=1</code>. Si apunta a I/O (<code>MEM=0</code>), la memoria no debe habilitarse.</li>
+        <li><strong style="color:var(--accent-en)">Condición 3:</strong> El chip debe estar seleccionado: <code>CS=1</code> (Chip Select activo).</li>
+        <li><strong style="color:var(--accent-en)">Condición 4:</strong> El reloj debe estar en fase alta: <code>CLK=1</code> (sincronización del bus).</li>
+      </ul>
+      <div class="formula-box" style="margin-top:12px; border-color:#f43f5e44;">
+        <div class="label">Expresión Booleana</div>
+        <div class="formula" style="font-size:1.05rem; text-align:center;">
+          <span class="sig" style="color:var(--accent-en); font-weight:700;">MEM_ENABLE</span>
+          <span class="op"> = </span>
+          <span class="op">(</span><span class="sig">READ</span><span class="op"> + </span><span class="sig">WRITE</span><span class="op">) · </span>
+          <span class="sig">MEM</span><span class="op"> · </span>
+          <span class="sig">CS</span><span class="op"> · </span><span class="sig">CLK</span>
+        </div>
+      </div>
+      <p style="margin-top:12px; color:#f43f5e; font-size:0.78rem;">⚠ Si cualquiera de las cuatro condiciones falla, MEM_ENABLE = 0 y la memoria queda completamente inactiva. En particular: cuando IO_SELECT=1 (acceso a I/O), MEM=0, por lo tanto MEM_ENABLE=0 automáticamente.</p>
+    </div>
+  </div>
+
+  <!-- TRUTH TABLE -->
+  <div class="tab-panel" data-tab="truth">
+    <div style="overflow-x:auto;">
+      <table class="truth-table" id="truthTable"></table>
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="tab-panel" data-tab="arch">
+    <div style="overflow-x:auto;">
+      <svg id="archDiagram" viewBox="0 0 900 420" style="width:100%; max-width:900px; min-width:580px; height:auto; display:block; margin:0 auto;" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- Gradientes de fondo para bloques principales -->
+          <linearGradient id="gradCPU" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#1e3a5f"/>
+            <stop offset="100%" stop-color="#0f2236"/>
+          </linearGradient>
+          <linearGradient id="gradMEM" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#1a3350"/>
+            <stop offset="100%" stop-color="#0d1f33"/>
+          </linearGradient>
+          <linearGradient id="gradIO" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2d1f4e"/>
+            <stop offset="100%" stop-color="#1a1230"/>
+          </linearGradient>
+          <linearGradient id="gradArb" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#1a3340"/>
+            <stop offset="100%" stop-color="#0d2028"/>
+          </linearGradient>
+          <!-- Marcadores de flecha -->
+          <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#60a5fa"/>
+          </marker>
+          <marker id="arrowOrange" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#fb923c"/>
+          </marker>
+          <marker id="arrowViolet" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#a78bfa"/>
+          </marker>
+          <marker id="arrowEmerald" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#34d399"/>
+          </marker>
+          <marker id="arrowAmber" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f59e0b"/>
+          </marker>
+          <marker id="arrowRose" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f43f5e"/>
+          </marker>
+          <!-- Filtro glow sutil -->
+          <filter id="glowSoft" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- ─── FONDO GENERAL ─── -->
+        <rect width="900" height="420" rx="12" fill="#0d1220"/>
+
+        <!-- ─── TÍTULO ─── -->
+        <text x="450" y="28" text-anchor="middle" font-family="Sora, sans-serif" font-size="13" font-weight="600" fill="#7b8fa6" letter-spacing="2">ARQUITECTURA DEL BUS DE MEMORIA</text>
+
+        <!-- ════════════════════════════════════════════
+             BUSES (bandas horizontales centrales)
+             ════════════════════════════════════════════ -->
+        <!-- Bus de Direcciones -->
+        <rect x="150" y="80" width="600" height="36" rx="6" fill="#60a5fa" fill-opacity="0.08" stroke="#60a5fa" stroke-opacity="0.35" stroke-width="1"/>
+        <text x="450" y="103" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="11" font-weight="600" fill="#60a5fa">BUS DE DIRECCIONES</text>
+
+        <!-- Bus de Datos -->
+        <rect x="150" y="192" width="600" height="36" rx="6" fill="#38bdf8" fill-opacity="0.08" stroke="#38bdf8" stroke-opacity="0.35" stroke-width="1"/>
+        <text x="450" y="215" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="11" font-weight="600" fill="#38bdf8">BUS DE DATOS</text>
+
+        <!-- Bus de Control -->
+        <rect x="150" y="304" width="600" height="36" rx="6" fill="#a78bfa" fill-opacity="0.08" stroke="#a78bfa" stroke-opacity="0.35" stroke-width="1"/>
+        <text x="450" y="327" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="11" font-weight="600" fill="#a78bfa">BUS DE CONTROL</text>
+
+        <!-- ════════════════════════════════════════════
+             CPU (bloque izquierda)
+             ════════════════════════════════════════════ -->
+        <rect x="18" y="120" width="110" height="160" rx="10" fill="url(#gradCPU)" stroke="#38bdf8" stroke-opacity="0.4" stroke-width="1.5" filter="url(#glowSoft)"/>
+        <rect x="18" y="120" width="110" height="26" rx="10" fill="#1e3a5f"/>
+        <rect x="18" y="140" width="110" height="6" rx="0" fill="#1e3a5f"/>
+        <text x="73" y="138" text-anchor="middle" font-family="Sora, sans-serif" font-size="12" font-weight="600" fill="#38bdf8">CPU</text>
+        <text x="73" y="162" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8.5" fill="#7b8fa6">Procesador</text>
+        <text x="73" y="176" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8.5" fill="#7b8fa6">Central</text>
+        <!-- Señales que sale de CPU -->
+        <text x="73" y="200" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#60a5fa">→ Dirección</text>
+        <text x="73" y="213" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#38bdf8">↔ Datos</text>
+        <text x="73" y="226" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#a78bfa">→ Ctrl</text>
+        <text x="73" y="241" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#38bdf8">READ</text>
+        <text x="73" y="253" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#fb923c">WRITE</text>
+        <text x="73" y="265" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#38bdf8">CPU_REQ</text>
+
+        <!-- Conectores CPU → buses (líneas) -->
+        <line x1="128" y1="98" x2="150" y2="98" stroke="#60a5fa" stroke-width="2" marker-end="url(#arrowBlue)"/>
+        <line x1="128" y1="210" x2="150" y2="210" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+        <line x1="128" y1="322" x2="150" y2="322" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrowViolet)"/>
+
+        <!-- ════════════════════════════════════════════
+             MEMORIA (bloque derecha superior)
+             ════════════════════════════════════════════ -->
+        <rect x="772" y="55" width="110" height="120" rx="10" fill="url(#gradMEM)" stroke="#f43f5e" stroke-opacity="0.45" stroke-width="1.5" filter="url(#glowSoft)"/>
+        <rect x="772" y="55" width="110" height="24" rx="10" fill="#1a3350"/>
+        <rect x="772" y="73" width="110" height="6" rx="0" fill="#1a3350"/>
+        <text x="827" y="72" text-anchor="middle" font-family="Sora, sans-serif" font-size="11" font-weight="600" fill="#f43f5e">MEMORIA</text>
+        <text x="827" y="96" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8" fill="#7b8fa6">Chip RAM</text>
+        <!-- Señales sobre memoria -->
+        <text x="827" y="114" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#f43f5e">MEM_ENABLE</text>
+        <text x="827" y="126" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#60a5fa">CS (Chip Select)</text>
+        <text x="827" y="138" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#f59e0b">CLK</text>
+        <text x="827" y="152" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#38bdf8">MEM_READ</text>
+        <text x="827" y="164" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#fb923c">MEM_WRITE</text>
+
+        <!-- Conectores buses → Memoria -->
+        <line x1="750" y1="98" x2="772" y2="98" stroke="#60a5fa" stroke-width="2" marker-end="url(#arrowBlue)"/>
+        <line x1="750" y1="210" x2="772" y2="210" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+        <!-- ════════════════════════════════════════════
+             DISPOSITIVOS I/O (bloque derecha inferior)
+             ════════════════════════════════════════════ -->
+        <rect x="772" y="230" width="110" height="100" rx="10" fill="url(#gradIO)" stroke="#a78bfa" stroke-opacity="0.4" stroke-width="1.5" filter="url(#glowSoft)"/>
+        <rect x="772" y="230" width="110" height="24" rx="10" fill="#2d1f4e"/>
+        <rect x="772" y="248" width="110" height="6" rx="0" fill="#2d1f4e"/>
+        <text x="827" y="247" text-anchor="middle" font-family="Sora, sans-serif" font-size="11" font-weight="600" fill="#a78bfa">DISPOSITIVOS</text>
+        <text x="827" y="264" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8" fill="#7b8fa6">I/O (Disco, Red)</text>
+        <text x="827" y="282" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#a78bfa">IO_SELECT</text>
+        <text x="827" y="294" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#34d399">BUS_GRANT</text>
+        <text x="827" y="308" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#a78bfa">BUS_REQ</text>
+
+        <!-- Conectores buses → I/O -->
+        <line x1="750" y1="280" x2="772" y2="280" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrowViolet)"/>
+
+        <!-- ════════════════════════════════════════════
+             DECODIFICADOR DE DIRECCIÓN (centro superior)
+             ════════════════════════════════════════════ -->
+        <rect x="330" y="48" width="240" height="30" rx="8" fill="#151d2e" stroke="#60a5fa" stroke-opacity="0.3" stroke-width="1"/>
+        <text x="450" y="68" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="9.5" font-weight="600" fill="#60a5fa">DECODIFICADOR DE DIRECCIÓN</text>
+        <!-- Etiquetas MEM / IO saliendo del decodificador -->
+        <text x="370" y="100" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8" fill="#38bdf8">MEM=1</text>
+        <text x="530" y="100" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8" fill="#a78bfa">IO=1</text>
+        <!-- Líneas decodificador -->
+        <line x1="370" y1="78" x2="370" y2="80" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <line x1="530" y1="78" x2="530" y2="80" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3,2"/>
+
+        <!-- ════════════════════════════════════════════
+             ARBITRADOR (centro inferior)
+             ════════════════════════════════════════════ -->
+        <rect x="340" y="355" width="220" height="48" rx="10" fill="url(#gradArb)" stroke="#34d399" stroke-opacity="0.4" stroke-width="1.5" filter="url(#glowSoft)"/>
+        <rect x="340" y="355" width="220" height="22" rx="10" fill="#1a3340"/>
+        <rect x="340" y="371" width="220" height="6" rx="0" fill="#1a3340"/>
+        <text x="450" y="371" text-anchor="middle" font-family="Sora, sans-serif" font-size="11" font-weight="600" fill="#34d399">ARBITRADOR DE BUS</text>
+        <text x="450" y="393" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="8" fill="#7b8fa6">BUS_REQ · BUS_AVAIL → BUS_GRANT</text>
+
+        <!-- Conector Bus Control → Arbitrador -->
+        <line x1="450" y1="340" x2="450" y2="355" stroke="#34d399" stroke-width="2" marker-end="url(#arrowEmerald)"/>
+
+        <!-- ════════════════════════════════════════════
+             SEÑALES DE CONTROL (etiquetas flotantes sobre Bus Control)
+             ════════════════════════════════════════════ -->
+        <text x="200" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#38bdf8">READ</text>
+        <text x="260" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#fb923c">WRITE</text>
+        <text x="330" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#60a5fa">CS</text>
+        <text x="380" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#f59e0b">CLK</text>
+        <text x="520" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#34d399">BUS_REQ</text>
+        <text x="600" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#34d399">BUS_AVAIL</text>
+        <text x="690" y="300" text-anchor="middle" font-family="Share Tech Mono, monospace" font-size="7.5" fill="#f43f5e">MEM_EN</text>
+
+        <!-- ════════════════════════════════════════════
+             LEYENDA INFERIOR
+             ════════════════════════════════════════════ -->
+        <!-- Línea separadora -->
+        <line x1="50" y1="410" x2="850" y2="410" stroke="#2a3a5c" stroke-width="0.5"/>
+      </svg>
+    </div>
+
+    <!-- Leyenda de colores debajo del diagrama -->
+    <div style="display:flex; flex-wrap:wrap; gap:16px; justify-content:center; margin-top:12px;">
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:18px; height:4px; background:#60a5fa; border-radius:2px;"></div>
+        <span style="font-size:0.7rem; color:#7b8fa6; font-family:'Share Tech Mono',monospace;">Direcciones</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:18px; height:4px; background:#38bdf8; border-radius:2px;"></div>
+        <span style="font-size:0.7rem; color:#7b8fa6; font-family:'Share Tech Mono',monospace;">Datos</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:18px; height:4px; background:#a78bfa; border-radius:2px;"></div>
+        <span style="font-size:0.7rem; color:#7b8fa6; font-family:'Share Tech Mono',monospace;">Control</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:18px; height:4px; background:#f43f5e; border-radius:2px;"></div>
+        <span style="font-size:0.7rem; color:#7b8fa6; font-family:'Share Tech Mono',monospace;">MEM_ENABLE</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:18px; height:4px; background:#34d399; border-radius:2px;"></div>
+        <span style="font-size:0.7rem; color:#7b8fa6; font-family:'Share Tech Mono',monospace;">Arbitraje</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:5px;">
+        <div style="width:18px; height:4px; background:#f59e0b; border-radius:2px;"></div>
+        <span style="font-size:0.7rem; color:#7b8fa6; font-family:'Share Tech Mono',monospace;">Reloj (CLK)</span>
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+// ================================================================
+//  TRUTH TABLE (generada dinámicamente para MEM_ENABLE)
+// ================================================================
+function buildTruthTable() {
+  const table = document.getElementById('truthTable');
+  const headers = ['READ','WRITE','MEM','CS','CLK','→','MEM_ENABLE'];
+  let html = '<table class="truth-table"><tr>';
+  headers.forEach(h => {
+    const color = h==='MEM_ENABLE' ? 'color:var(--accent-en)' : h==='→' ? 'color:var(--accent-clk)' : h==='MEM' ? 'color:var(--accent-rd)' : '';
+    html += `<th style="${color}">${h}</th>`;
+  });
+  html += '</tr>';
+
+  // 2^5 = 32 combos: READ, WRITE, MEM, CS, CLK
+  for (let i = 0; i < 32; i++) {
+    const READ  = (i >> 4) & 1;
+    const WRITE = (i >> 3) & 1;
+    const MEM   = (i >> 2) & 1;
+    const CS    = (i >> 1) & 1;
+    const CLK   = i & 1;
+    const EN    = (READ | WRITE) & MEM & CS & CLK;
+    html += '<tr>';
+    [READ, WRITE, MEM, CS, CLK].forEach(v => {
+      html += `<td class="${v?'val-1':'val-0'}">${v}</td>`;
+    });
+    html += `<td style="color:var(--txt-micro)">→</td>`;
+    html += `<td class="${EN?'val-1':'val-0'}" style="font-size:0.9rem; ${EN?'color:var(--accent-en)':''}">${EN}</td>`;
+    html += '</tr>';
+  }
+  html += '</table>';
+  table.innerHTML = html;
+}
+
+// ================================================================
+//  MASTER UPDATE
+// ================================================================
+function update() {
+  const outs = calcOutputs();
+  updateOutputBadges(outs);
+  pushHistory();
+}
+
+// ================================================================
+//  INIT
+// ================================================================
+(function init() {
+  renderInputs();
+  renderOutputBadges();
+  renderScenarios();
+  setupCanvas();
+  renderLegend();
+  renderTabs();
+  buildTruthTable();
+  // initial frame
+  update();
+})();
+</script>
+</body>
+</html>
